@@ -1,0 +1,571 @@
+common/employeeValidator.js
+import Joi from "joi";
+
+const employeeValidation = (data) => {
+  const employeeSchme = Joi.object({
+    emp_name: Joi.string().required(),
+    emp_email: Joi.string().required(),
+    emp_address: Joi.string().required(),
+    emp_phone: Joi.string().required(),
+  });
+  return employeeSchme.validate(data);
+};
+
+export default employeeValidation;
+
+common/errorHandler.js 
+class ErrorHandler extends Error {
+  constructor(message, statusCode) {
+    super(message);
+    this.statusCode = statusCode;
+    Error.captureStackTrace(this, this.constructor);
+  }
+}
+
+export default ErrorHandler;
+
+common/errormiddleware.js 
+const middleware = (err, req, res, next) => {
+  err.statusCode = err.statusCode || 500;
+  let error = { ...err };
+  error.message = err.message;
+  res.status(err.statusCode).json({
+    error,
+    message: error.message,
+    stack: error.stack,
+  });
+};
+
+export default middleware;
+
+MySQL database
+Create a database called codeat21 and create a table called employee with fields:
+Database Name – codeat21
+Table Name – employee
+
+codeat21 
+CREATE TABLE `images` (
+  `emp_id` int(11) NOT NULL AUTO_INCREMENT,
+  `emp_name` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `emp_email` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `emp_address` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `emp_phone` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL,
+   PRIMARY KEY (`emp_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci; 
+
+ config/db.js 
+const util = require('util');
+const mysql = require('mysql2');
+const pool = mysql.createPool({
+  connectionLimit: 10,
+	host     : 'localhost',
+  user     : 'root',   
+  password : '',  
+  database : 'codeat21'  
+});
+
+// Ping database to check for common exception errors.
+pool.getConnection((err, connection) => {
+  if (err) {
+    if (err.code === 'PROTOCOL_CONNECTION_LOST') {
+      console.error('Database connection was closed.');
+    }
+    if (err.code === 'ER_CON_COUNT_ERROR') {
+      console.error('Database has too many connections.');
+    }
+    if (err.code === 'ECONNREFUSED') {
+      console.error('Database connection was refused.');
+    }
+  }
+
+  if (connection) connection.release();
+
+  return;
+});
+
+// Promisify for Node.js async/await.
+pool.query = util.promisify(pool.query);
+
+const executeQuery = (query, arraParms) => {
+  return new Promise((resolve, reject) => {
+    try {
+      pool.query(query, arraParms, (err, data) => {
+        if (err) {
+          console.log("error in executing the query");
+          reject(err);
+        }
+        resolve(data);
+      });
+    } catch (err) {
+      reject(err);
+    }
+  });
+};
+
+ module.exports = { executeQuery };
+ controller/employee/employee.js 
+import { executeQuery } from "../../config/db";
+import employeeValidation from "../../common/employeeValidator";
+import ErrorHandler from "../../common/errorHandler";
+const getAllEmployees = async (req, res) => {
+  try {
+    console.log("all the employees");
+    let employeeData = await executeQuery("select * from employee", []);
+    res.send(employeeData);
+  } catch (err) {
+    res.status(500).json(err);
+  }
+};
+
+const getEmployeeById = async (req, res, next) => {
+  let id = req.query.id;
+  try {
+    console.log("employee by id");
+    let employeeData = await executeQuery(
+      `select * from employee where emp_id=${id}`,
+      []
+    );
+    if (employeeData.length > 0) res.status(200).json(employeeData);
+    else {
+      next(new ErrorHandler(`no employee found with this id ${id}`, 404));
+    }
+  } catch (err) {
+    res.status(500).json(err);
+  }
+};
+
+const deleteEmployeeById = async (req, res, next) => {
+  let id = req.query.id;
+  try {
+    let employeeData = await executeQuery(
+      "delete from employee where emp_id=?",
+      [id]
+    );
+    res.status(200).json("Employee Deleted Successfully");
+  } catch (err) {
+    res.status(500).json(err);
+  }
+};
+
+const saveEmployee = async (req, res) => {
+  try {
+    const result = req.body;
+    const { emp_name, emp_email, emp_address, emp_phone } = result;
+    let { error } = employeeValidation(result);
+    if (error) {
+      res.status(400).json(error.details[0].message);
+    } else {
+      console.log("post request");
+      let employeeData = await executeQuery(
+        "insert into employee(emp_name,emp_email,emp_address,emp_phone) values(?,?,?,?)",
+        [emp_name, emp_email, emp_address, emp_phone]
+      );
+      employeeData = await executeQuery(
+        `select * from employee where emp_id=${employeeData.insertId}`
+      );
+      res.status(201).json(employeeData);
+    }
+  } catch (err) {
+    res.status(400).json(err);
+  }
+};
+
+const updateEmployee = async (req, res) => {
+  let id = req.query.id;
+  console.log("id", id);
+  const { emp_name, emp_email, emp_address, emp_phone } = req.body;
+  console.log("req.body", req.body);
+  try {
+    let employeeData = await executeQuery(
+      "select * from employee where emp_id=?",
+      [id]
+    );
+    if (employeeData.length > 0) {
+      console.log("putrequest", employeeData);
+      employeeData = await executeQuery(
+        `update employee set emp_name=?,emp_email=?,emp_address=?,emp_phone=? where emp_id=${id}`,
+        [emp_name, emp_email, emp_address, emp_phone]
+      );
+      res.status(200).json(employeeData);
+    } else {
+      res.status(400).json(`employee not found on this id=${id}`);
+    }
+  } catch (err) {
+    res.status(400).json(err);
+  }
+};
+
+export {
+  getAllEmployees,
+  getEmployeeById,
+  deleteEmployeeById,
+  saveEmployee,
+  updateEmployee,
+};
+ pages/api/employee/[id].js 
+import nc from "next-connect";
+import onError from "../../../common/errormiddleware";
+import {
+  getEmployeeById,
+  deleteEmployeeById,
+  updateEmployee,
+} from "../../../controller/employee/employee";
+
+const handler = nc({ onError });
+handler.get(getEmployeeById);
+handler.delete(deleteEmployeeById);
+handler.put(updateEmployee);
+export default handler;
+ pages/api/employee/index.js 
+import nc from "next-connect";
+import onError from "../../../common/errormiddleware";
+import {
+  getAllEmployees,
+  saveEmployee,
+} from "../../../controller/employee/employee";
+const handler = nc(onError);
+handler.get(getAllEmployees);
+handler.post(saveEmployee);
+export default handler;
+ pages/employee/[id].js 
+import EditEmployee from "../EditEmployee";
+
+function updateEmployee({ employee }) {
+  console.log("employee", employee);
+  return <EditEmployee employeeUpdateData={employee} />;
+}
+
+export async function getServerSideProps({ params }) {
+  const res = await fetch(`http://localhost:3000/api/employee/${params.id}`);
+  const employee = await res.json();
+
+  return {
+    props: { employee },
+  };
+}
+
+export default updateEmployee;
+ pages/addEmployee.js
+import axios from "axios";
+import React, { useState } from "react";
+import { useRouter } from "next/router";
+import styles from "../styles/AddEmployee.module.css";
+function AddEmployee() {
+  const router = useRouter();
+  const [addEmployee, setEmployee] = useState({
+    emp_name: "",
+    emp_email: "",
+    emp_address: "",
+    emp_phone: "",
+  });
+
+  const onSubmit = async (e) => {
+    e.preventDefault();
+    let data = await axios.post(
+      `http://localhost:3000/api/employee`,
+      addEmployee
+    );
+    if (data.data) router.push("/");
+    setEmployee({
+      emp_name: "",
+      emp_email: "",
+      emp_address: "",
+      emp_phone: "",
+    });
+  };
+
+  const handleChange = (e) => {
+    const value = e.target.value;
+    console.log("value", value);
+    setEmployee({ ...addEmployee, [e.target.name]: value });
+  };
+  return (
+    <>
+      <div className={styles.addform}>
+        <h1>ADD EMPLOYEE</h1>
+        <form onSubmit={onSubmit}>
+          <div>
+            <input
+              type="text"
+              className={styles.input}
+              name="emp_name"
+              placeholder="Enter Name"
+              onChange={handleChange}
+              value={addEmployee.emp_name}
+            />
+          </div>
+          <div>
+            <input
+              type="email"
+              className={styles.input}
+              name="emp_email"
+              placeholder="Enter Email"
+              onChange={handleChange}
+              value={addEmployee.emp_email}
+            />
+          </div>
+          <div>
+            <input
+              type="text"
+              className={styles.input}
+              name="emp_address"
+              placeholder="Enter Address"
+              onChange={handleChange}
+              value={addEmployee.emp_address}
+            />
+          </div>
+          <div>
+            <input
+              type="text"
+              className={styles.input}
+              name="emp_phone"
+              placeholder="Enter Phone"
+              onChange={handleChange}
+              value={addEmployee.emp_phone}
+            />
+          </div>
+          <div>
+            <button type="submit"> Submit</button>
+          </div>
+        </form>
+      </div>
+    </>
+  );
+}
+
+export default AddEmployee;
+ pages/editEmployee.js
+import axios from "axios";
+import React, { useState, useEffect } from "react";
+import { useRouter } from "next/router";
+import Link from "next/link";
+import styles from "../styles/UpdateEmployee.module.css";
+function EditEmployee({ employeeUpdateData }) {
+  console.log("employeeid", employeeUpdateData);
+  const router = useRouter();
+  const [addEmployee, setEmployee] = useState({
+    emp_name: "",
+    emp_email: "",
+    emp_address: "",
+    emp_phone: "",
+  });
+  useEffect(() => {
+    setEmployee(employeeUpdateData[0]);
+  }, [employeeUpdateData]);
+  const onSubmit = async (e) => {
+    e.preventDefault();
+    let data = await axios.put(
+      `http://localhost:3000/api/employee/${employeeUpdateData[0].emp_id}`,
+      addEmployee
+    );
+    if (data.data) router.push("/");
+    setEmployee({
+      emp_name: "",
+      emp_email: "",
+      emp_address: "",
+      emp_phone: "",
+    });
+  };
+
+  const handleChange = (e) => {
+    const value = e.target.value;
+    console.log("value", value);
+    setEmployee({ ...addEmployee, [e.target.name]: value });
+  };
+  return (
+    <>
+      <div className={styles.addform}>
+        <h1>ADD EMPLOYEE</h1>
+        <form onSubmit={onSubmit}>
+          <div>
+            <input
+              type="text"
+              className={styles.input}
+              name="emp_name"
+              placeholder="Enter Name"
+              onChange={handleChange}
+              value={addEmployee.emp_name}
+            />
+          </div>
+          <div>
+            <input
+              type="email"
+              className={styles.input}
+              name="emp_email"
+              placeholder="Enter Email"
+              onChange={handleChange}
+              value={addEmployee.emp_email}
+            />
+          </div>
+          <div>
+            <input
+              type="text"
+              className={styles.input}
+              name="emp_address"
+              placeholder="Enter Address"
+              onChange={handleChange}
+              value={addEmployee.emp_address}
+            />
+          </div>
+          <div>
+            <input
+              type="text"
+              className={styles.input}
+              name="emp_phone"
+              placeholder="Enter Phone"
+              onChange={handleChange}
+              value={addEmployee.emp_phone}
+            />
+          </div>
+          <div>
+            <button type="submit" className={styles.button}>
+              Submit
+            </button>
+            <button className={styles.button}>
+              <Link href={`/`}>Go Back</Link>
+            </button>
+          </div>
+        </form>
+      </div>
+    </>
+  );
+}
+
+export default EditEmployee;
+ pages/index.js
+import Link from "next/link";
+import { useRouter } from "next/router";
+import styles from "../styles/EmployeeList.module.css";
+import axios from "axios";
+function Home({ data }) {
+  console.log("data", data);
+  const router = useRouter();
+  const deleteEmployee = async (id) => {
+    let data = await axios.delete(`http://localhost:3000/api/employee/${id}`);
+    router.push("/");
+  };
+  return (
+    <div className={styles.cols}>
+      <table className={styles.table}>
+        <thead className={styles.thead}>
+          <tr>
+            <th className={styles.th}>EmployeeId</th>
+            <th className={styles.th}>EmployeeName</th>
+            <th className={styles.th}>EmployeeEmail</th>
+            <th className={styles.th}>EmployeeAddress</th>
+            <th className={styles.th}>EmployeePhone</th>
+            <th className={styles.th}>Actions</th>
+          </tr>
+        </thead>
+        <tbody className={styles.tbody}>
+          {data.map((empData, index) => (
+            <tr key={index}>
+              <th className={styles.th}>{index + 1}</th>
+              <td className={styles.th}>{empData.emp_name}</td>
+              <td className={styles.th}>{empData.emp_email}</td>
+              <td className={styles.th}>{empData.emp_address}</td>
+              <td className={styles.th}>{empData.emp_phone}</td>
+              <td className={styles.btn__cols}>
+                <button
+                  className={styles.delete}
+                  onClick={() => deleteEmployee(empData.emp_id)}
+                >
+                  Delete
+                </button>
+                <button className={styles.update}>
+                  <Link href={`/employee/${empData.emp_id}`}>Update</Link>
+                </button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div className={styles.addEmployeeCenter}>
+        <button className={styles.addEmployee}>
+          <Link href={`/addEmployee`}>AddEmployee</Link>
+        </button>
+      </div>
+     
+    </div>
+  );
+}
+
+export async function getServerSideProps() {
+  const res = await fetch("http://localhost:3000/api/employee");
+  const data = await res.json();
+  return {
+    props: { data },
+  };
+}
+
+export default Home;
+ server/server.js 
+const express = require("express");
+const { executeQuery } = require("../config/db");
+const port = 9000;
+const app = express();
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+app.get("/employee", async (req, res) => {
+  try {
+    let employeeData = await executeQuery("select * from employee");
+    res.status(200).json(employeeData);
+  } catch (err) {
+    res.status(500).json(err);
+  }
+});
+
+app.get("/employee/:id", async (req, res) => {
+  let id = req.params.id;
+  try {
+    let employeeData = await executeQuery(
+      "select * from employee where emp_id=?",
+      [id]
+    );
+    res.status(200).json(employeeData);
+  } catch (err) {
+    res.status(500).json(err);
+  }
+});
+
+app.post("/saveEmployee", async (req, res) => {
+  try {
+    const { emp_name, emp_email, emp_address, emp_phone } = req.body;
+    let employeeData = await executeQuery(
+      "insert into employee(emp_name,emp_email,emp_address,emp_phone) values(?,?,?,?)",
+      [emp_name, emp_email, emp_address, emp_phone]
+    );
+    res.status(201).json(employeeData);
+  } catch (err) {
+    res.status(400).json(err);
+  }
+});
+app.listen(port, () => console.log(`server is running on port ${port}`));
+ package.json 
+{
+  "name": "mysql-next",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "axios": "^0.21.1",
+    "cors": "^2.8.5",
+    "express": "^4.17.1",
+    "joi": "^17.4.1",
+    "mysql2": "^2.3.3",
+    "next": "11.0.1",
+    "next-connect": "^0.10.1",
+    "react": "17.0.2",
+    "react-dom": "17.0.2"
+  },
+  "devDependencies": {
+    "eslint": "7.30.0",
+    "eslint-config-next": "11.0.1"
+  }
+}
